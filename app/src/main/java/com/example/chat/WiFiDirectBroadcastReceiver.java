@@ -23,7 +23,6 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
         this.channel = channel;
         this.activity = activity;
     }
-
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
@@ -41,7 +40,10 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
             if (manager != null) {
                 // Verificar si tenemos el permiso de dispositivos cercanos en Android 12 o superior
                 if (ActivityCompat.checkSelfPermission(context, android.Manifest.permission.NEARBY_WIFI_DEVICES)
-                        == PackageManager.PERMISSION_GRANTED) {
+                        == PackageManager.PERMISSION_GRANTED ||
+                        ActivityCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
+                                == PackageManager.PERMISSION_GRANTED) {
+                    // Si el permiso está concedido, solicitar lista de pares
                     manager.requestPeers(channel, new WifiP2pManager.PeerListListener() {
                         @Override
                         public void onPeersAvailable(WifiP2pDeviceList peerList) {
@@ -49,8 +51,8 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
                         }
                     });
                 } else {
-                    // Si no tienes el permiso, muestra un mensaje o maneja el caso en la actividad principal
-                    Toast.makeText(context, "Permiso NEARBY_WIFI_DEVICES no concedido", Toast.LENGTH_SHORT).show();
+                    // Solicitar permiso si es necesario (dependiendo de la API de tu app)
+                    Toast.makeText(context, "Permiso para acceder a dispositivos cercanos no concedido", Toast.LENGTH_SHORT).show();
                 }
             }
         } else if (WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION.equals(action)) {
@@ -65,10 +67,11 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
                 manager.requestConnectionInfo(channel, activity);
             } else {
                 // Desconectado
-                Toast.makeText(context, "Desconectado", Toast.LENGTH_SHORT).show();
+                Toast.makeText(context, "Desconectado de Wi-Fi Direct", Toast.LENGTH_SHORT).show();
             }
         } else if (WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION.equals(action)) {
-            // Información del dispositivo actual
+            // Información del dispositivo actual (si deseas manejar este evento)
         }
     }
+
 }

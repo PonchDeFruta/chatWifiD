@@ -12,6 +12,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.net.NetworkInfo;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pDeviceList;
@@ -58,22 +59,16 @@ public class MainActivity extends AppCompatActivity implements WifiP2pManager.Co
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 12 o superior
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES)
-                    != PackageManager.PERMISSION_GRANTED) {
-                // Si el permiso no está concedido, solicítalo
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.NEARBY_WIFI_DEVICES},
-                        1001); // Código de solicitud de permiso
-            } else {
-                // Si ya tienes el permiso, continúa con el descubrimiento de dispositivos
-                discoverPeers();
-            }
-        } else {
-            // Si es una versión inferior a Android 12, no se necesita este permiso
-            discoverPeers();
-        }
+        // Inicializar Wi-Fi Direct
+        manager = (WifiP2pManager) getSystemService(Context.WIFI_P2P_SERVICE);
+        channel = manager.initialize(this, getMainLooper(), null);
 
+        // Verificar permisos y comenzar el descubrimiento de pares
+        if (checkPermissions()) {
+            discoverPeers();
+        } else {
+            requestPermissions();
+        }
 
         // Inicializar UI
         peersRecyclerView = findViewById(R.id.peersRecyclerView);
@@ -97,10 +92,6 @@ public class MainActivity extends AppCompatActivity implements WifiP2pManager.Co
         messagesRecyclerView.setLayoutManager(new LinearLayoutManager(this));
         messagesRecyclerView.setAdapter(messageAdapter);
 
-        // Inicializar Wi-Fi Direct
-        manager = (WifiP2pManager) getSystemService(Context.WIFI_P2P_SERVICE);
-        channel = manager.initialize(this, getMainLooper(), null);
-
         // Configurar IntentFilter
         intentFilter = new IntentFilter();
         intentFilter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
@@ -113,11 +104,8 @@ public class MainActivity extends AppCompatActivity implements WifiP2pManager.Co
         registerReceiver(receiver, intentFilter);
 
         // Solicitar permisos si es necesario
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
-                    PERMISSIONS_REQUEST_CODE);
+        if (!checkPermissions()) {
+            requestPermissions();
         }
 
         // Configurar botón de descubrir pares
@@ -142,7 +130,6 @@ public class MainActivity extends AppCompatActivity implements WifiP2pManager.Co
                     messageAdapter.addMessage(new Message(message, true));
                     messageInput.setText("");
                     // Implementar lógica para enviar mensajes
-                    // Por ejemplo, mantener una lista de clientes conectados
                 } else if (connectionInfo != null && connectionInfo.groupFormed) {
                     // Si eres el cliente, enviar al host
                     messageAdapter.addMessage(new Message(message, true));
@@ -174,29 +161,68 @@ public class MainActivity extends AppCompatActivity implements WifiP2pManager.Co
         }
     }
 
-    private void discoverPeers() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 12 o superior
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.NEARBY_WIFI_DEVICES},
-                        1001); // Código de solicitud de permiso
-                return; // No seguir si el permiso no está concedido
+    // Verificar permisos
+    private boolean checkPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED;
+        } else {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        }
+    }
+
+    // Solicitar permisos
+    private void requestPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.NEARBY_WIFI_DEVICES},
+                    PERMISSIONS_REQUEST_CODE);
+        } else {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                    PERMISSIONS_REQUEST_CODE);
+        }
+    }
+
+    // Sobrescribir el método para manejar la respuesta del usuario a la solicitud de permiso
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        if (requestCode == PERMISSIONS_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // El permiso ha sido concedido
+                discoverPeers();
+            } else {
+                // El permiso ha sido denegado
+                Toast.makeText(this, "Permiso denegado. La aplicación no funcionará correctamente.", Toast.LENGTH_LONG).show();
             }
         }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
 
-        // Llamar a discoverPeers si se tienen los permisos
-        manager.discoverPeers(channel, new WifiP2pManager.ActionListener() {
-            @Override
-            public void onSuccess() {
-                Toast.makeText(MainActivity.this, "Descubrimiento iniciado", Toast.LENGTH_SHORT).show();
+    private void discoverPeers() {
+        if (manager != null && channel != null) {
+            // Verificar si los permisos necesarios están concedidos
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ActivityCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED)) {
+                // Si los permisos no están concedidos, solicitarlos
+                requestPermissions();
+                return;
             }
 
-            @Override
-            public void onFailure(int reason) {
-                Toast.makeText(MainActivity.this, "Fallo en el descubrimiento: " + reason, Toast.LENGTH_SHORT).show();
-            }
-        });
+            // Continuar con el descubrimiento si los permisos están concedidos
+            manager.discoverPeers(channel, new WifiP2pManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+                    Toast.makeText(MainActivity.this, "Descubrimiento iniciado", Toast.LENGTH_SHORT).show();
+                }
+
+                @Override
+                public void onFailure(int reason) {
+                    Toast.makeText(MainActivity.this, "Error al iniciar el descubrimiento", Toast.LENGTH_SHORT).show();
+                }
+            });
+        } else {
+            Log.e(TAG, "WifiP2pManager o el canal es nulo en discoverPeers()");
+        }
     }
 
 
@@ -206,35 +232,37 @@ public class MainActivity extends AppCompatActivity implements WifiP2pManager.Co
         peerListAdapter.updatePeerList(peers);
         if (peers.isEmpty()) {
             Toast.makeText(this, "No se encontraron dispositivos", Toast.LENGTH_SHORT).show();
-            return;
         }
     }
 
     private void connectToDevice(WifiP2pDevice device) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 12 o superior
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.NEARBY_WIFI_DEVICES},
-                        1001); // Código de solicitud de permiso
-                return; // No seguir si el permiso no está concedido
+        if (manager != null && channel != null) {
+            // Verificar si los permisos necesarios están concedidos
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ActivityCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED)) {
+                // Si los permisos no están concedidos, solicitarlos
+                requestPermissions();
+                return;
             }
+
+            // Configurar la conexión una vez que los permisos estén concedidos
+            WifiP2pConfig config = new WifiP2pConfig();
+            config.deviceAddress = device.deviceAddress;
+
+            manager.connect(channel, config, new WifiP2pManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+                    Toast.makeText(MainActivity.this, "Conectado a " + device.deviceName, Toast.LENGTH_SHORT).show();
+                }
+
+                @Override
+                public void onFailure(int reason) {
+                    Toast.makeText(MainActivity.this, "Error al conectar: " + reason, Toast.LENGTH_SHORT).show();
+                }
+            });
+        } else {
+            Log.e(TAG, "WifiP2pManager o el canal es nulo en connectToDevice()");
         }
-
-        WifiP2pConfig config = new WifiP2pConfig();
-        config.deviceAddress = device.deviceAddress;
-
-        manager.connect(channel, config, new WifiP2pManager.ActionListener() {
-            @Override
-            public void onSuccess() {
-                Toast.makeText(MainActivity.this, "Conectando a " + device.deviceName, Toast.LENGTH_SHORT).show();
-            }
-
-            @Override
-            public void onFailure(int reason) {
-                Toast.makeText(MainActivity.this, "Fallo en la conexión: " + reason, Toast.LENGTH_SHORT).show();
-            }
-        });
     }
 
 
@@ -243,26 +271,8 @@ public class MainActivity extends AppCompatActivity implements WifiP2pManager.Co
         connectionInfo = info;
         if (info.groupFormed && info.isGroupOwner) {
             Toast.makeText(this, "Eres el anfitrión", Toast.LENGTH_SHORT).show();
-            // Implementar lógica para aceptar clientes si es necesario
         } else if (info.groupFormed) {
             Toast.makeText(this, "Conectado al host", Toast.LENGTH_SHORT).show();
         }
-    }
-
-    // Manejo de permisos
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
-                                           @NonNull int[] grantResults) {
-        if (requestCode == PERMISSIONS_REQUEST_CODE) {
-            if (grantResults.length > 0 &&
-                    grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                // Permiso concedido
-                Toast.makeText(this, "Permiso concedido", Toast.LENGTH_SHORT).show();
-            } else {
-                // Permiso denegado
-                Toast.makeText(this, "Permiso denegado. La aplicación no funcionará correctamente.", Toast.LENGTH_LONG).show();
-            }
-        }
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 }
